@@ -2,7 +2,17 @@ import { ethers } from "hardhat";
 import { Staking } from "../types/Staking";
 
 const STAKING_CONTRACT_ADDRESS = process.env.STAKING_CONTRACT_ADDRESS ?? "";
-const STAKE_AMOUNT = ethers.utils.parseEther("1");
+// Get stake amount from command line argument
+const stakeArg = process.argv[2];
+if (!stakeArg) {
+  console.log("No stake amount provided, using default of 1 ETH");
+}
+try {
+  const STAKE_AMOUNT = ethers.utils.parseEther(stakeArg || "1");
+} catch (error) {
+  console.error("Invalid stake amount provided. Please provide a valid number.");
+  process.exit(1);
+}
 
 async function main() {
   const [account] = await ethers.getSigners();

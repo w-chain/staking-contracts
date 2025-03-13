@@ -1,12 +1,8 @@
-pragma solidity ^0.8.7;
-
-import "@openzeppelin/contracts/utils/Address.sol";
+pragma solidity ^0.8.19;
 
 contract Staking {
-    using Address for address;
-
     // Parameters
-    uint128 public constant VALIDATOR_THRESHOLD = 1 ether;
+    uint128 public constant VALIDATOR_THRESHOLD = 10e6 ether;
 
     // Properties
     address[] public _validators;
@@ -29,7 +25,13 @@ contract Staking {
 
     // Modifiers
     modifier onlyEOA() {
-        require(!msg.sender.isContract(), "Only EOA can call function");
+        address sender = msg.sender;
+        require(tx.origin == sender, "Only EOA can call function");
+        uint256 size;
+        assembly {
+            size := extcodesize(sender)
+        }
+        require(size == 0, "Only EOA can call function");
         _;
     }
 

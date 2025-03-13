@@ -16,6 +16,7 @@ describe("Staking contract deployment", async () => {
 describe("Staking and Unstaking", function () {
   const MinValidatorCount = 4;
   const MaxValidatorCount = 6;
+  const VALIDATOR_THRESHOLD = ethers.utils.parseEther("10000000");
 
   const stake = async (account: SignerWithAddress, amount: BigNumber) => {
     return contract.connect(account).stake({ value: amount });
@@ -62,7 +63,7 @@ describe("Staking and Unstaking", function () {
   });
 
   describe("Stake", () => {
-    const value = ethers.utils.parseEther("1");
+    const value = VALIDATOR_THRESHOLD;
 
     it("should increase stakedAmount if account send value to contract", async () => {
       await expect(() => contract.stake({ value })).to.changeEtherBalances(
@@ -96,25 +97,22 @@ describe("Staking and Unstaking", function () {
 
     it("should reach full validator set capacity", async () => {
       await Promise.all(
-        accounts.slice(0, 6).map((account) => {
-          stake(account, value);
-        })
+        accounts.slice(0, MaxValidatorCount).map((account) => 
+          stake(account, value)
+        )
       );
 
-      await expect(stake(accounts[6], value)).to.be.revertedWith(
-        "Validator set has reached full capacity"
-      );
+      await expect(stake(accounts[MaxValidatorCount], value))
+        .to.be.revertedWith("Validator set has reached full capacity");
     });
 
     it("should be able to stake from staker account", async () => {
-      // 6 accounts will stake and become staker first
       await Promise.all(
-        accounts.slice(0, 6).map((account) => {
-          stake(account, value);
-        })
+        accounts.slice(0, 6).map((account) => 
+          stake(account, value)
+        )
       );
 
-      // staker can stake more
       await expect(stake(accounts[0], value))
         .to.emit(contract, "Staked")
         .withArgs(accounts[0].address, value);
@@ -122,55 +120,49 @@ describe("Staking and Unstaking", function () {
   });
 
   describe("Stake by transfer", () => {
-    const value = ethers.utils.parseEther("1");
-    let account: SignerWithAddress;
-
-    beforeEach(() => {
-      account = accounts[0];
-    });
+    const value = VALIDATOR_THRESHOLD;
 
     it("should increase stakedAmount if account send value to contract", async () => {
       await expect(() =>
-        account.sendTransaction({
-          from: account.address,
+        accounts[0].sendTransaction({
+          from: accounts[0].address,
           to: contract.address,
           value: value,
         })
-      ).to.changeEtherBalances([account, contract], [value.mul("-1"), value]);
+      ).to.changeEtherBalances([accounts[0], contract], [value.mul("-1"), value]);
 
-      expect(await contract.accountStake(account.address)).to.equal(value);
+      expect(await contract.accountStake(accounts[0].address)).to.equal(value);
     });
 
     it("should emit Staked event", async () => {
       await expect(
-        account.sendTransaction({
-          from: account.address,
+        accounts[0].sendTransaction({
+          from: accounts[0].address,
           to: contract.address,
           value: value,
         })
       )
         .to.emit(contract, "Staked")
-        .withArgs(account.address, value);
+        .withArgs(accounts[0].address, value);
     });
 
     it("should append to validator set", async () => {
-      await account.sendTransaction({
-        from: account.address,
+      await accounts[0].sendTransaction({
+        from: accounts[0].address,
         to: contract.address,
         value: value,
       });
 
-      expect(await contract.validators()).to.include(account.address);
-      expect(await contract.isValidator(account.address)).to.be.true;
+      expect(await contract.validators()).to.include(accounts[0].address);
+      expect(await contract.isValidator(accounts[0].address)).to.be.true;
     });
   });
 
   describe("Unstake", () => {
     const numInitialValidators = 5;
-    const stakedAmount = ethers.utils.parseEther("1");
+    const stakedAmount = VALIDATOR_THRESHOLD;
 
     beforeEach(async () => {
-      // set required number of validators
       await Promise.all(
         accounts
           .slice(0, numInitialValidators)
@@ -185,19 +177,15 @@ describe("Staking and Unstaking", function () {
     });
 
     it("should fail to unstake if current validator number equals to the min validator number", async () => {
-      // remove 1 account first
       await contract.connect(accounts[1]).unstake();
-      // current number of validators should be same to 4 (MinimumRequiredNumValidators)
       await expect(await contract.validators()).to.have.length(
         MinValidatorCount
       );
 
-      // cannot remove validator anymore
       await expect(contract.connect(accounts[0]).unstake()).to.be.revertedWith(
         "Validators can't be less than the minimum required validator num"
       );
 
-      // check the account is still validator
       expect(await contract.isValidator(accounts[0].address)).to.be.true;
       expect(await contract.accountStake(accounts[0].address)).to.equal(
         stakedAmount
@@ -205,30 +193,22 @@ describe("Staking and Unstaking", function () {
     });
 
     it("should succeed and refund the staked balance for non-validator", async () => {
-      // remove 1 account first
       await contract.connect(accounts[1]).unstake();
-      // current number of validators should be same to 4 (MinimumRequiredNumValidators)
       await expect(await contract.validators()).to.have.length(
         MinValidatorCount
       );
 
-      // staking by new account
       const newStaker = accounts[numInitialValidators];
       const newStakerStakeAmount = ethers.utils.parseEther("0.5");
-      // new account stake not-enough amount to become validator
       await stake(newStaker, newStakerStakeAmount);
-      // validator set doesn't change
       await expect(await contract.validators()).to.have.length(
         MinValidatorCount
       );
 
-      // cannot remove validator anymore
       await expect(contract.connect(newStaker).unstake())
         .to.emit(contract, "Unstaked")
         .withArgs(newStaker.address, newStakerStakeAmount);
 
-      // check the account is still validator
-      // validator set doesn't change
       await expect(await contract.validators()).to.have.length(
         MinValidatorCount
       );
@@ -259,8 +239,8 @@ describe("Staking and Unstaking", function () {
     });
 
     it("should exchange between 2 addresses in validators when contract remove validator in the middle of array", async () => {
-      // make sure validators is in order from oldest
-      expect(await contract.validators())
+      const initialValidators = await contract.validators();
+      expect(initialValidators)
         .to.have.length(numInitialValidators)
         .and.to.deep.equal([
           accounts[0].address,
@@ -270,11 +250,10 @@ describe("Staking and Unstaking", function () {
           accounts[4].address,
         ]);
 
-      // first account's unstake
       await contract.unstake();
-      expect(await contract.validators())
-        // [0, 1, 2, 3, 4] => [4, 1, 2, 3]
-        .to.have.length(4)
+      const updatedValidators = await contract.validators();
+      expect(updatedValidators)
+        .to.have.length(numInitialValidators - 1)
         .and.to.deep.equal([
           accounts[4].address,
           accounts[1].address,
@@ -284,47 +263,39 @@ describe("Staking and Unstaking", function () {
     });
 
     it("should be able to accept a new validator after the last one has unstaked", async () => {
-      // Reach full slot capacity
-      const value = ethers.utils.parseEther("1");
       await Promise.all(
-        accounts.slice(0, 6).map((account) => {
-          stake(account, value);
-        })
+        accounts.slice(0, MaxValidatorCount).map((account) => 
+          stake(account, stakedAmount)
+        )
       );
 
-      // Account #0 unstakes
       await contract.connect(accounts[0]).unstake();
 
-      // Account #6 should be able to become a validator
-      await expect(stake(accounts[6], value)).not.to.be.revertedWith(
-        "Validator set has reached full capacity"
-      );
+      await expect(stake(accounts[MaxValidatorCount], stakedAmount))
+        .not.to.be.revertedWith("Validator set has reached full capacity");
     });
   });
 
   describe("Register BLS Public Key", () => {
     it("should succeed and register BLS Public Key", async () => {
-      const data = "0x12345678"
-      const tx = contract.connect(accounts[0]).registerBLSPublicKey(
-        data,
-      )
+      const data = "0x12345678";
+      const tx = contract.connect(accounts[0]).registerBLSPublicKey(data);
 
       await expect(tx)
-      .to.emit(contract, "BLSPublicKeyRegistered")
-      .withArgs(accounts[0].address, data);
-    })
+        .to.emit(contract, "BLSPublicKeyRegistered")
+        .withArgs(accounts[0].address, data);
+    });
   });
 
   describe("Get BLS Public Keys", () => {
     const numValidators = 5;
-    const numRegisteredAccounts = 10;
-    const stakedAmount = ethers.utils.parseEther("1");
-    const blsPublicKeys = new Array(numRegisteredAccounts).fill(null).map((_, idx) => (
-      BigNumber.from(idx).toHexString()
-    ))
+    const stakedAmount = VALIDATOR_THRESHOLD;
 
     beforeEach(async () => {
-      // set required number of validators
+      const blsPublicKeys = new Array(numValidators).fill(null).map((_, idx) => 
+        ethers.utils.hexZeroPad(ethers.utils.hexlify(idx), 32)
+      );
+
       await Promise.all(
         accounts
           .slice(0, numValidators)
@@ -332,17 +303,21 @@ describe("Staking and Unstaking", function () {
       );
 
       await Promise.all(
-        accounts.splice(0, numRegisteredAccounts)
-        .map((account, i) => contract.connect(account).registerBLSPublicKey(
-          blsPublicKeys[i]
-        ))
-      )
+        accounts
+          .slice(0, numValidators)
+          .map((account, i) => contract.connect(account).registerBLSPublicKey(blsPublicKeys[i]))
+      );
     });
 
     it("should return only the BLS Public Keys of Validators", async () => {
-      expect(await contract.validatorBLSPublicKeys())
+      const blsPublicKeys = new Array(numValidators).fill(null).map((_, idx) => 
+        ethers.utils.hexZeroPad(ethers.utils.hexlify(idx), 32)
+      );
+
+      const keys = await contract.validatorBLSPublicKeys();
+      expect(keys)
         .to.have.length(numValidators)
-        .and.to.deep.equal(blsPublicKeys.slice(0, numValidators));
-    })
+        .and.to.deep.equal(blsPublicKeys);
+    });
   });
 });
